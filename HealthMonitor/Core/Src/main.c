@@ -150,6 +150,7 @@ int main(void)
 		if (pulseOximiterIntFlag)
 		{
 			pulseOximiterIntFlag = 0;
+
 			processPulseOximeterData();
 		}
 	}
