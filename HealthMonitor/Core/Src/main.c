@@ -44,7 +44,7 @@
 #define MOVING_AVG_L 12       // Size of the moving average buffer
 #define DATA_LENGTH  1000     // Length of data buffer
 #define INVALID_VALUE 0xFFFFFFFF // Sentinel value for invalid SpO2 data
-#define ADC_BUF_LEN 256   // buffer length for DMA
+#define ADC_BUF_LEN 64   // buffer length for DMA
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
