@@ -44,7 +44,7 @@
 #define MOVING_AVG_L 12       // Size of the moving average buffer
 #define DATA_LENGTH  1000     // Length of data buffer
 #define INVALID_VALUE 0xFFFFFFFF // Sentinel value for invalid SpO2 data
-#define ADC_BUF_LEN 64   // buffer length for DMA
+#define ADC_BUF_LEN 8   // buffer length for DMA
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -515,12 +515,20 @@ static void send_adc_data(uint16_t* buf, int len_buf)
     const float VREF = 3.3f;
     const int ADC_RES = 4095;
 
+    float sum = 0.0f;
+
+    // Sum all ADC samples
     for (int i = 0; i < len_buf; i++)
     {
-        float voltage = (buf[i] * VREF) / ADC_RES;
-        int len = sprintf(msg, "%.3f\r\n", voltage);
-        HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
+        sum += (buf[i] * VREF) / ADC_RES;
     }
+
+    // Compute average
+    float mvoltage = sum / len_buf;
+
+    // Send averaged value over UART
+    int len = sprintf(msg, "%.3f\r\n", mvoltage);
+    HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
