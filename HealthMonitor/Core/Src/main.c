@@ -500,12 +500,18 @@ static inline float ecg_scale_for_chart(uint16_t raw)
 /* -------- ADC Conversion Complete Callback -------- */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-  char msg[64];
-  for (int i = 0; i < ADC_BUF_LEN; i++)
-  {
-    int len = sprintf(msg, "%u\r\n", adc_buf[i]);
-    HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
-  }
+    char msg[64];
+    float voltage;
+    const float VREF = 3.3f;          // reference voltage (adjust if different)
+    const int ADC_RES = 4095;         // 12-bit ADC max value
+
+    for (int i = 0; i < ADC_BUF_LEN; i++)
+    {
+        voltage = (adc_buf[i] * VREF) / ADC_RES;  // convert raw to voltage
+
+        int len = sprintf(msg, "%.3f\r\n", voltage); // 3 decimal places
+        HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
+    }
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
