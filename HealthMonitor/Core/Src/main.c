@@ -111,6 +111,7 @@ static void processMovingAverage(float irSignal, float redSignal);
 static void handlePeakDetection(void);
 static void resetBuffers(void);
 static void shiftBuffers(void);
+static void send_adc_data(uint16_t* buf, int len_buf);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -402,7 +403,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
+  huart2.Init.BaudRate = 921600;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
@@ -498,18 +499,26 @@ static inline float ecg_scale_for_chart(uint16_t raw)
 }
 
 /* -------- ADC Conversion Complete Callback -------- */
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc)
+{
+    send_adc_data(adc_buf, ADC_BUF_LEN/2);
+}
+
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
+    send_adc_data(&adc_buf[ADC_BUF_LEN/2], ADC_BUF_LEN/2);
+}
+
+static void send_adc_data(uint16_t* buf, int len_buf)
+{
     char msg[64];
-    float voltage;
-    const float VREF = 3.3f;          // reference voltage (adjust if different)
-    const int ADC_RES = 4095;         // 12-bit ADC max value
+    const float VREF = 3.3f;
+    const int ADC_RES = 4095;
 
-    for (int i = 0; i < ADC_BUF_LEN; i++)
+    for (int i = 0; i < len_buf; i++)
     {
-        voltage = (adc_buf[i] * VREF) / ADC_RES;  // convert raw to voltage
-
-        int len = sprintf(msg, "%.3f\r\n", voltage); // 3 decimal places
+        float voltage = (buf[i] * VREF) / ADC_RES;
+        int len = sprintf(msg, "%.3f\r\n", voltage);
         HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
     }
 }
