@@ -44,6 +44,7 @@
 #define MOVING_AVG_L 12       // Size of the moving average buffer
 #define DATA_LENGTH  1000     // Length of data buffer
 #define INVALID_VALUE 0xFFFFFFFF // Sentinel value for invalid SpO2 data
+#define ADC_BUF_LEN 256   // buffer length for DMA
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -59,7 +60,26 @@ I2C_HandleTypeDef hi2c2;
 
 TIM_HandleTypeDef htim2;
 
+UART_HandleTypeDef huart2;
+
 /* USER CODE BEGIN PV */
+
+
+
+/* === ECG sampling state === */
+volatile uint16_t ecg_sample_raw = 0;     // last ADC sample (0..4095)
+volatile uint8_t  ecg_new_sample = 0;     // flag set in ADC ISR
+/* Optional: light smoothing for display only */
+static float ecg_lp_prev = 0.0f;
+
+uint16_t adc_buf[ADC_BUF_LEN];  // DMA buffer
+
+
+static void MX_ADC1_Init(void);
+static void MX_TIM2_Init(void);
+static inline float ecg_scale_for_chart(uint16_t raw);
+
+
 volatile uint8_t pulseOximiterIntFlag = 0;
 extern uint8_t startFinish;
 float prevInput_ir = 0.0f, prevOutput_ir = 0.0f;
@@ -83,6 +103,7 @@ static void MX_DMA_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 static void processPulseOximeterData(void);
 static void handleHighPassFilter(float irRaw, float redRaw);
@@ -133,6 +154,7 @@ int main(void)
   MX_I2C2_Init();
   MX_ADC1_Init();
   MX_TIM2_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   FIFO_LED_DATA fifoLedData;
   pulseOximeter_resetRegisters();
@@ -143,6 +165,15 @@ int main(void)
   pulseOximeter_setLedCurrent(IR_LED, 5);
   pulseOximeter_resetFifo();
   pulseOximeter_setMeasurementMode(SPO2);
+
+//  HAL_ADC_Start_IT(&hadc1);          // enable EOC interrupt-driven conversions
+//  HAL_TIM_Base_Start(&htim2);        // TIM2 triggers ADC at 500 Hz
+
+  // Start ADC DMA
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, ADC_BUF_LEN);
+  // Start Timer to trigger ADC
+  HAL_TIM_Base_Start(&htim2);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -152,18 +183,20 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	if (PUSLE_OXIMETER_INTERRUPT && startFinish)
-	{
-		if (pulseOximiterIntFlag)
-		{
-			pulseOximiterIntFlag = 0;
+//	if (PUSLE_OXIMETER_INTERRUPT && startFinish)
+//	{
+//		if (pulseOximiterIntFlag)
+//		{
+//			pulseOximiterIntFlag = 0;
+//
+//			processPulseOximeterData();
+//		}
+//	}
+//
+//    lv_timer_handler();
+//    HAL_Delay(1);
+	  HAL_Delay(1000);
 
-			processPulseOximeterData();
-		}
-	}
-
-    lv_timer_handler();
-    HAL_Delay(1);
   }
   /* USER CODE END 3 */
 }
@@ -252,7 +285,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
@@ -263,7 +296,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_84CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -354,6 +387,39 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -395,14 +461,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : USART_TX_Pin USART_RX_Pin */
-  GPIO_InitStruct.Pin = USART_TX_Pin|USART_RX_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
   /*Configure GPIO pin : LD2_Pin */
   GPIO_InitStruct.Pin = LD2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -429,6 +487,26 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 /* USER CODE BEGIN 4 */
+
+static inline float ecg_scale_for_chart(uint16_t raw)
+{
+    float centered = (float)((int32_t)raw - 2048);   // center around 0
+    float scaled   = centered / 8.0f;                // tame amplitude for your chart
+    /* simple one-pole low-pass for prettier trace (optional) */
+    ecg_lp_prev = 0.2f * scaled + 0.8f * ecg_lp_prev;
+    return ecg_lp_prev;
+}
+
+/* -------- ADC Conversion Complete Callback -------- */
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+  char msg[64];
+  for (int i = 0; i < ADC_BUF_LEN; i++)
+  {
+    int len = sprintf(msg, "%u\r\n", adc_buf[i]);
+    HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
+  }
+}
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
