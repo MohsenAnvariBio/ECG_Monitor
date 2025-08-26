@@ -168,11 +168,6 @@ int main(void)
   pulseOximeter_resetFifo();
   pulseOximeter_setMeasurementMode(SPO2);
 
-//  HAL_ADC_Start_IT(&hadc1);          // enable EOC interrupt-driven conversions
-//  HAL_TIM_Base_Start(&htim2);        // TIM2 triggers ADC at 500 Hz
-
-  // Start ADC DMA
-//  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, ADC_BUF_LEN);
 
   // Start Timer first
   HAL_TIM_Base_Start(&htim2);
@@ -209,6 +204,8 @@ int main(void)
           adc_ready = 0;
           float voltage = adc_to_voltage(adc_val);  // convert here
 
+//          update_chart_with_gain(voltage); // shows row signal
+
           int len = snprintf(msg, sizeof(msg), "%.3f\r\n", voltage);
 
           // replace ',' with '.'
@@ -221,7 +218,8 @@ int main(void)
           HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
 
       }
-      HAL_Delay(1);
+//      lv_timer_handler();
+//      HAL_Delay(1);
 
   }
   /* USER CODE END 3 */
