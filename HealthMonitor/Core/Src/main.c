@@ -94,7 +94,8 @@ uint32_t buffHR = 0;
 int i = 0, j = 0, filled = 0, filled2 = 0;
 uint32_t R_count = 0;
 const float alpha = 0.8f; // Smoothing factor (0 < alpha <= 1)
-char msg[32];
+char msg1[32];
+char msg2[32];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -195,19 +196,24 @@ int main(void)
 //			processPulseOximeterData();
 //		}
 //	}
-////
+//
 //    lv_timer_handler();
 //    HAL_Delay(1);
 
       if(adc_ready)
       {
-          adc_ready = 0;
-          float voltage = adc_to_voltage(adc_val);  // convert here
-          float ma_voltage = processMovingAverageVoltage(voltage);
-          int len = snprintf(msg, sizeof(msg), "%.3f\r\n", ma_voltage);
+		  adc_ready = 0;
+		  float voltage = adc_to_voltage(adc_val);  // convert here
+//		  float ma_ecg = processMovingAverageVoltage(voltage);
+		  int len1 = snprintf(msg1, sizeof(msg1), "E,%.3f\r\n", voltage);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)msg1, len1, HAL_MAX_DELAY);
 
-          HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
-
+		  FIFO_LED_DATA fifoLedData = pulseOximeter_readFifo();
+		  float irRaw = (float)fifoLedData.irLedRaw;
+		  float irFiltered = highPassFilter(irRaw, &prevInput_ir, &prevOutput_ir, 0.95f);
+		  float ma_ppg = processMovingAverageVoltage(irFiltered);
+		  int len2 = snprintf(msg2, sizeof(msg2), "P,%.3f\r\n", ma_ppg);
+          HAL_UART_Transmit(&huart2, (uint8_t*)msg2, len2, HAL_MAX_DELAY);
       }
 //      lv_timer_handler();
 //      HAL_Delay(1);
