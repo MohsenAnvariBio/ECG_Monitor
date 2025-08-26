@@ -54,7 +54,6 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
-DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c2;
 
@@ -71,6 +70,8 @@ volatile uint16_t ecg_sample_raw = 0;     // last ADC sample (0..4095)
 volatile uint8_t  ecg_new_sample = 0;     // flag set in ADC ISR
 /* Optional: light smoothing for display only */
 static float ecg_lp_prev = 0.0f;
+volatile uint16_t adc_val = 0;
+volatile uint8_t adc_ready = 0;
 
 uint16_t adc_buf[ADC_BUF_LEN];  // DMA buffer
 
@@ -94,12 +95,12 @@ uint32_t buffHR = 0;
 int i = 0, j = 0, filled = 0, filled2 = 0;
 uint32_t R_count = 0;
 const float alpha = 0.8f; // Smoothing factor (0 < alpha <= 1)
+char msg[32];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_DMA_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
@@ -111,7 +112,8 @@ static void processMovingAverage(float irSignal, float redSignal);
 static void handlePeakDetection(void);
 static void resetBuffers(void);
 static void shiftBuffers(void);
-static void send_adc_data(uint16_t* buf, int len_buf);
+float read_adc_voltage(void);
+static inline float adc_to_voltage(uint16_t raw);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -151,7 +153,6 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
   MX_I2C2_Init();
   MX_ADC1_Init();
   MX_TIM2_Init();
@@ -171,9 +172,15 @@ int main(void)
 //  HAL_TIM_Base_Start(&htim2);        // TIM2 triggers ADC at 500 Hz
 
   // Start ADC DMA
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, ADC_BUF_LEN);
-  // Start Timer to trigger ADC
+//  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, ADC_BUF_LEN);
+
+  // Start Timer first
   HAL_TIM_Base_Start(&htim2);
+
+  // Enable ADC and wait for external trigger
+  if (HAL_ADC_Start_IT(&hadc1) != HAL_OK) {
+      Error_Handler();
+  }
 
   /* USER CODE END 2 */
 
@@ -196,7 +203,25 @@ int main(void)
 //
 //    lv_timer_handler();
 //    HAL_Delay(1);
-	  HAL_Delay(1000);
+
+      if(adc_ready)
+      {
+          adc_ready = 0;
+          float voltage = adc_to_voltage(adc_val);  // convert here
+
+          int len = snprintf(msg, sizeof(msg), "%.3f\r\n", voltage);
+
+          // replace ',' with '.'
+          for (int i = 0; i < len; i++) {
+              if (msg[i] == ',') {
+                  msg[i] = '.';
+              }
+          }
+
+          HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
+
+      }
+      HAL_Delay(1);
 
   }
   /* USER CODE END 3 */
@@ -286,7 +311,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DMAContinuousRequests = ENABLE;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
@@ -363,7 +388,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 8999;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 19;
+  htim2.Init.Period = 1;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -403,7 +428,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 921600;
+  huart2.Init.BaudRate = 115200;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
@@ -417,22 +442,6 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
-
-}
-
-/**
-  * Enable DMA controller clock
-  */
-static void MX_DMA_Init(void)
-{
-
-  /* DMA controller clock enable */
-  __HAL_RCC_DMA2_CLK_ENABLE();
-
-  /* DMA interrupt init */
-  /* DMA2_Stream0_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
 
 }
 
@@ -489,47 +498,22 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 /* USER CODE BEGIN 4 */
 
-static inline float ecg_scale_for_chart(uint16_t raw)
-{
-    float centered = (float)((int32_t)raw - 2048);   // center around 0
-    float scaled   = centered / 8.0f;                // tame amplitude for your chart
-    /* simple one-pole low-pass for prettier trace (optional) */
-    ecg_lp_prev = 0.2f * scaled + 0.8f * ecg_lp_prev;
-    return ecg_lp_prev;
-}
 
-/* -------- ADC Conversion Complete Callback -------- */
-void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc)
+static inline float adc_to_voltage(uint16_t raw)
 {
-    send_adc_data(adc_buf, ADC_BUF_LEN/2);
+    // 12-bit ADC, Vref = 3.3 V
+    return ((float)raw * 3.3f) / 4095.0f;
 }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-    send_adc_data(&adc_buf[ADC_BUF_LEN/2], ADC_BUF_LEN/2);
-}
-
-static void send_adc_data(uint16_t* buf, int len_buf)
-{
-    char msg[64];
-    const float VREF = 3.3f;
-    const int ADC_RES = 4095;
-
-    float sum = 0.0f;
-
-    // Sum all ADC samples
-    for (int i = 0; i < len_buf; i++)
+    if(hadc->Instance == ADC1)
     {
-        sum += (buf[i] * VREF) / ADC_RES;
+        adc_val = HAL_ADC_GetValue(hadc); // store value
+        adc_ready = 1;                     // set flag
     }
-
-    // Compute average
-    float mvoltage = sum / len_buf;
-
-    // Send averaged value over UART
-    int len = sprintf(msg, "%.3f\r\n", mvoltage);
-    HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
 }
+
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
