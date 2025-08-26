@@ -28,13 +28,6 @@ lv_obj_t *labelTE;
 LV_FONT_DECLARE(lv_font_montserrat_20); // Modern medium-sized font for labels
 
 // Increment event callback
-static void lv_spinbox_decrement_event_cb(lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_SHORT_CLICKED || code == LV_EVENT_LONG_PRESSED_REPEAT) {
-        lv_spinbox_increment(spinbox);
-    }
-}
-
 // Decrement event callback
 static void lv_spinbox_increment_event_cb(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
@@ -113,6 +106,13 @@ void switch_event_handler(lv_event_t *e) {
         }
     }
 }
+static void lv_spinbox_decrement_event_cb(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_SHORT_CLICKED || code == LV_EVENT_LONG_PRESSED_REPEAT) {
+        lv_spinbox_increment(spinbox);
+    }
+}
+
 bool is_moving_average_enabled() {
     return use_moving_average;
 }

@@ -41,10 +41,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MOVING_AVG_L 12       // Size of the moving average buffer
+#define MOVING_AVG_L 40       // Size of the moving average buffer
 #define DATA_LENGTH  1000     // Length of data buffer
 #define INVALID_VALUE 0xFFFFFFFF // Sentinel value for invalid SpO2 data
-#define ADC_BUF_LEN 8   // buffer length for DMA
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -69,12 +68,12 @@ UART_HandleTypeDef huart2;
 volatile uint16_t ecg_sample_raw = 0;     // last ADC sample (0..4095)
 volatile uint8_t  ecg_new_sample = 0;     // flag set in ADC ISR
 /* Optional: light smoothing for display only */
-static float ecg_lp_prev = 0.0f;
 volatile uint16_t adc_val = 0;
 volatile uint8_t adc_ready = 0;
 
-uint16_t adc_buf[ADC_BUF_LEN];  // DMA buffer
-
+static float buffer_voltage[MOVING_AVG_L];
+static int buf_index = 0;
+static int buf_filled = 0;
 
 static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
@@ -114,6 +113,7 @@ static void resetBuffers(void);
 static void shiftBuffers(void);
 float read_adc_voltage(void);
 static inline float adc_to_voltage(uint16_t raw);
+static float processMovingAverageVoltage(float voltage);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -195,7 +195,7 @@ int main(void)
 //			processPulseOximeterData();
 //		}
 //	}
-//
+////
 //    lv_timer_handler();
 //    HAL_Delay(1);
 
@@ -203,17 +203,8 @@ int main(void)
       {
           adc_ready = 0;
           float voltage = adc_to_voltage(adc_val);  // convert here
-
-//          update_chart_with_gain(voltage); // shows row signal
-
-          int len = snprintf(msg, sizeof(msg), "%.3f\r\n", voltage);
-
-          // replace ',' with '.'
-          for (int i = 0; i < len; i++) {
-              if (msg[i] == ',') {
-                  msg[i] = '.';
-              }
-          }
+          float ma_voltage = processMovingAverageVoltage(voltage);
+          int len = snprintf(msg, sizeof(msg), "%.3f\r\n", ma_voltage);
 
           HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, HAL_MAX_DELAY);
 
@@ -512,6 +503,22 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
     }
 }
 
+static float processMovingAverageVoltage(float voltage)
+{
+    // fill buffer
+    buffer_voltage[buf_index++] = voltage;
+    if (buf_index >= MOVING_AVG_L) {
+        buf_index = 0;
+        buf_filled = 1;
+    }
+
+    if (buf_filled) {
+        return mean(buffer_voltage, MOVING_AVG_L);
+    } else {
+        // not enough samples yet, return raw
+        return voltage;
+    }
+}
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {

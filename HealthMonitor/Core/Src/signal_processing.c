@@ -19,12 +19,14 @@
  * @return The calculated mean of the array
  */
 float mean(float *array, int length) {
-	float sum = 0;
+	float sum = 0.0f;
 	for (int i = 0; i < length; i++) {
 		sum += array[i];
 	}
 	return sum / length;
 }
+
+
 
 /**
  * Calculate the median of an array.
