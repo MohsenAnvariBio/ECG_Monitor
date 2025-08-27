@@ -96,6 +96,16 @@ uint32_t R_count = 0;
 const float alpha = 0.8f; // Smoothing factor (0 < alpha <= 1)
 char msg1[32];
 char msg2[32];
+
+typedef struct {
+    float buffer[MOVING_AVG_L];
+    int index;
+    int filled;
+} MovingAverageFilter;
+
+MovingAverageFilter ecgFilter = {0};
+MovingAverageFilter ppgFilter = {0};
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -114,8 +124,7 @@ static void resetBuffers(void);
 static void shiftBuffers(void);
 float read_adc_voltage(void);
 static inline float adc_to_voltage(uint16_t raw);
-static float processMovingAverageVoltage(float voltage);
-void resetMovingAverageBuffer(void);
+static float processMovingAverageVoltage(float voltage, MovingAverageFilter *filter);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -205,15 +214,14 @@ int main(void)
       {
 		  adc_ready = 0;
 		  float voltage = adc_to_voltage(adc_val);  // convert here
-//		  float ma_ecg = processMovingAverageVoltage(voltage);
-		  int len1 = snprintf(msg1, sizeof(msg1), "E,%.3f\r\n", voltage);
+		  float ma_ecg = processMovingAverageVoltage(voltage, &ecgFilter);
+		  int len1 = snprintf(msg1, sizeof(msg1), "E,%.3f\r\n", ma_ecg);
 		  HAL_UART_Transmit(&huart2, (uint8_t*)msg1, len1, HAL_MAX_DELAY);
 
-		  resetMovingAverageBuffer();
 		  FIFO_LED_DATA fifoLedData = pulseOximeter_readFifo();
 		  float irRaw = (float)fifoLedData.irLedRaw;
 		  float irFiltered = highPassFilter(irRaw, &prevInput_ir, &prevOutput_ir, 0.95f);
-		  float ma_ppg = processMovingAverageVoltage(irFiltered);
+		  float ma_ppg = processMovingAverageVoltage(irFiltered, &ppgFilter);
 		  int len2 = snprintf(msg2, sizeof(msg2), "P,%.3f\r\n", ma_ppg);
           HAL_UART_Transmit(&huart2, (uint8_t*)msg2, len2, HAL_MAX_DELAY);
       }
@@ -511,31 +519,43 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
     }
 }
 
-static float processMovingAverageVoltage(float voltage)
+//static float processMovingAverageVoltage(float voltage, )
+//{
+//    // fill buffer
+//    buffer_voltage[buf_index++] = voltage;
+//    if (buf_index >= MOVING_AVG_L) {
+//        buf_index = 0;
+//        buf_filled = 1;
+//    }
+//
+//    if (buf_filled) {
+//        return mean(buffer_voltage, MOVING_AVG_L);
+//    } else {
+//        // not enough samples yet, return raw
+//        return voltage;
+//    }
+//}
+
+static float processMovingAverageVoltage(float voltage, MovingAverageFilter *filter)
 {
+    float result;
+
     // fill buffer
-    buffer_voltage[buf_index++] = voltage;
-    if (buf_index >= MOVING_AVG_L) {
-        buf_index = 0;
-        buf_filled = 1;
+    filter->buffer[filter->index++] = voltage;
+    if (filter->index >= MOVING_AVG_L) {
+        filter->index = 0;
+        filter->filled = 1;
     }
 
-    if (buf_filled) {
-        return mean(buffer_voltage, MOVING_AVG_L);
+    if (filter->filled) {
+        result = mean(filter->buffer, MOVING_AVG_L);
     } else {
-        // not enough samples yet, return raw
-        return voltage;
+        result = voltage; // not enough samples yet
     }
+
+    return result;
 }
 
-void resetMovingAverageBuffer(void)
-{
-    for (int i = 0; i < MOVING_AVG_L; i++) {
-        buffer_voltage[i] = 0.0f;
-    }
-    buf_index = 0;
-    buf_filled = 0;
-}
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
