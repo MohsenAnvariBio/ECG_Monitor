@@ -42,8 +42,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define MOVING_AVG_L 40       // Size of the moving average buffer
-#define PPG_MOVING_AVG_L 30       // Size of the moving average buffer 600/30=20
-#define ECG_MOVING_AVG_L 15       // Size of the moving average buffer
+#define PPG_MOVING_AVG_L 20       // Size of the moving average buffer 600/15=40
+#define ECG_MOVING_AVG_L 10       // Size of the moving average buffer
 #define DATA_LENGTH  1000     // Length of data buffer
 #define INVALID_VALUE 0xFFFFFFFF // Sentinel value for invalid SpO2 data
 /* USER CODE END PD */
@@ -220,8 +220,8 @@ int main(void)
 
 		  FIFO_LED_DATA fifoLedData = pulseOximeter_readFifo();
 		  float irRaw = (float)fifoLedData.irLedRaw;
-		  float irFiltered = highPassFilter(irRaw, &prevInput_ir, &prevOutput_ir, 0.95f);
-		  float ma_ppg = processMovingAverageVoltage(irRaw, &ppgFilter, PPG_MOVING_AVG_L);
+		  float irFiltered = highPassFilter(irRaw, &prevInput_ir, &prevOutput_ir, 0.995f);
+		  float ma_ppg = processMovingAverageVoltage(irFiltered, &ppgFilter, PPG_MOVING_AVG_L);
 		  int len2 = snprintf(msg2, sizeof(msg2), "P,%.3f\r\n", ma_ppg);
           HAL_UART_Transmit(&huart2, (uint8_t*)msg2, len2, HAL_MAX_DELAY);
       }
