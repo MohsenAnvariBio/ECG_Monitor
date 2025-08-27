@@ -42,6 +42,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define MOVING_AVG_L 40       // Size of the moving average buffer
+#define PPG_MOVING_AVG_L 30       // Size of the moving average buffer
+#define ECG_MOVING_AVG_L 15       // Size of the moving average buffer
 #define DATA_LENGTH  1000     // Length of data buffer
 #define INVALID_VALUE 0xFFFFFFFF // Sentinel value for invalid SpO2 data
 /* USER CODE END PD */
@@ -98,13 +100,16 @@ char msg1[32];
 char msg2[32];
 
 typedef struct {
-    float buffer[MOVING_AVG_L];
+    float *buffer;   // pointer to external buffer
     int index;
     int filled;
 } MovingAverageFilter;
 
-MovingAverageFilter ecgFilter = {0};
-MovingAverageFilter ppgFilter = {0};
+float ecgBuffer[ECG_MOVING_AVG_L];
+float ppgBuffer[PPG_MOVING_AVG_L];
+
+MovingAverageFilter ecgFilter = { ecgBuffer, 0, 0 };
+MovingAverageFilter ppgFilter = { ppgBuffer, 0, 0 };
 
 /* USER CODE END PV */
 
@@ -124,7 +129,7 @@ static void resetBuffers(void);
 static void shiftBuffers(void);
 float read_adc_voltage(void);
 static inline float adc_to_voltage(uint16_t raw);
-static float processMovingAverageVoltage(float voltage, MovingAverageFilter *filter);
+static float processMovingAverageVoltage(float voltage, MovingAverageFilter *filter, int buffer_len);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -214,14 +219,14 @@ int main(void)
       {
 		  adc_ready = 0;
 		  float voltage = adc_to_voltage(adc_val);  // convert here
-		  float ma_ecg = processMovingAverageVoltage(voltage, &ecgFilter);
+		  float ma_ecg = processMovingAverageVoltage(voltage, &ecgFilter, ECG_MOVING_AVG_L);
 		  int len1 = snprintf(msg1, sizeof(msg1), "E,%.3f\r\n", ma_ecg);
 		  HAL_UART_Transmit(&huart2, (uint8_t*)msg1, len1, HAL_MAX_DELAY);
 
 		  FIFO_LED_DATA fifoLedData = pulseOximeter_readFifo();
 		  float irRaw = (float)fifoLedData.irLedRaw;
 		  float irFiltered = highPassFilter(irRaw, &prevInput_ir, &prevOutput_ir, 0.95f);
-		  float ma_ppg = processMovingAverageVoltage(irFiltered, &ppgFilter);
+		  float ma_ppg = processMovingAverageVoltage(irFiltered, &ppgFilter, PPG_MOVING_AVG_L);
 		  int len2 = snprintf(msg2, sizeof(msg2), "P,%.3f\r\n", ma_ppg);
           HAL_UART_Transmit(&huart2, (uint8_t*)msg2, len2, HAL_MAX_DELAY);
       }
@@ -536,19 +541,21 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 //    }
 //}
 
-static float processMovingAverageVoltage(float voltage, MovingAverageFilter *filter)
+static float processMovingAverageVoltage(float voltage,
+                                         MovingAverageFilter *filter,
+                                         int buffer_len)
 {
     float result;
 
     // fill buffer
     filter->buffer[filter->index++] = voltage;
-    if (filter->index >= MOVING_AVG_L) {
+    if (filter->index >= buffer_len) {
         filter->index = 0;
         filter->filled = 1;
     }
 
     if (filter->filled) {
-        result = mean(filter->buffer, MOVING_AVG_L);
+        result = mean(filter->buffer, buffer_len);
     } else {
         result = voltage; // not enough samples yet
     }
