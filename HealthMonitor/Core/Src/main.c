@@ -115,6 +115,7 @@ static void shiftBuffers(void);
 float read_adc_voltage(void);
 static inline float adc_to_voltage(uint16_t raw);
 static float processMovingAverageVoltage(float voltage);
+void resetMovingAverageBuffer(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -208,6 +209,7 @@ int main(void)
 		  int len1 = snprintf(msg1, sizeof(msg1), "E,%.3f\r\n", voltage);
 		  HAL_UART_Transmit(&huart2, (uint8_t*)msg1, len1, HAL_MAX_DELAY);
 
+		  resetMovingAverageBuffer();
 		  FIFO_LED_DATA fifoLedData = pulseOximeter_readFifo();
 		  float irRaw = (float)fifoLedData.irLedRaw;
 		  float irFiltered = highPassFilter(irRaw, &prevInput_ir, &prevOutput_ir, 0.95f);
@@ -524,6 +526,15 @@ static float processMovingAverageVoltage(float voltage)
         // not enough samples yet, return raw
         return voltage;
     }
+}
+
+void resetMovingAverageBuffer(void)
+{
+    for (int i = 0; i < MOVING_AVG_L; i++) {
+        buffer_voltage[i] = 0.0f;
+    }
+    buf_index = 0;
+    buf_filled = 0;
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
